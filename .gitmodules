@@ -1,0 +1,6 @@
+[submodule "Drivers/stm32_uart_dma_idleInt"]
+	path = Drivers/stm32_uart_dma_idleInt
+	url = https://github.com/dansoskin/stm32_uart_dma_idleInt
+[submodule "Drivers/cFlexyStepper"]
+	path = Drivers/cFlexyStepper
+	url = https://github.com/dansoskin/cFlexyStepper
