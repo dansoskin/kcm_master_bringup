@@ -4,3 +4,9 @@
 [submodule "Drivers/cFlexyStepper"]
 	path = Drivers/cFlexyStepper
 	url = https://github.com/dansoskin/cFlexyStepper
+[submodule "Drivers/canbus_wrapper"]
+	path = Drivers/canbus_wrapper
+	url = https://github.com/dansoskin/canbus_wrapper
+[submodule "Drivers/odrive_lib"]
+	path = Drivers/odrive_lib
+	url = https://github.com/dansoskin/odrive_lib
