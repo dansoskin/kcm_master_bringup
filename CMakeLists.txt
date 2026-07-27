@@ -48,6 +48,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/globals.c
     ${CMAKE_SOURCE_DIR}/Core/Src/functions.c
     ${CMAKE_SOURCE_DIR}/Core/Src/decode_packet.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/plate_kinematics.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/roulette_sm.c
 
     ${CMAKE_SOURCE_DIR}/Drivers/stm32_uart_dma_idleInt/uart.c
     ${CMAKE_SOURCE_DIR}/Drivers/stm32_uart_dma_idleInt/lwrb.c
@@ -57,6 +59,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Drivers/cFlexyStepper/mcu_specific/cFlexyStepper_stm.c
 
     ${CMAKE_SOURCE_DIR}/Drivers/canbus_wrapper/can.c
+    ${CMAKE_SOURCE_DIR}/Drivers/synchronized_movement/synchronized_movement.c
 
     ${CMAKE_SOURCE_DIR}/Drivers/odrive_lib/src/odrive_comm.c
     ${CMAKE_SOURCE_DIR}/Drivers/odrive_lib/src/odrive_control.c
@@ -73,6 +76,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Drivers/stm32_uart_dma_idleInt
     ${CMAKE_SOURCE_DIR}/Drivers/cFlexyStepper
     ${CMAKE_SOURCE_DIR}/Drivers/canbus_wrapper
+    ${CMAKE_SOURCE_DIR}/Drivers/synchronized_movement
     ${CMAKE_SOURCE_DIR}/Drivers/odrive_lib/include
 )
 

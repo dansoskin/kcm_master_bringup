@@ -12,6 +12,7 @@
 
 #include "can.h"
 #include "odrive.h"
+#include "roulette_sm.h"
 
 /* USART6 / FDCAN1 handles are defined in main.c by CubeMX. */
 extern UART_HandleTypeDef huart6;
@@ -76,9 +77,15 @@ void setup(void)
                                          GPIO2_GPIO_Port, GPIO2_Pin);
     FlexyStepper_connectEnablePin(&stepper, GPIO3_GPIO_Port, GPIO3_Pin, true);
 
-    FlexyStepper_setConversion(&stepper, 3200.0f);  /* steps per unit          */
-    FlexyStepper_setAcceleration(&stepper, 0.1);  /* units per second^2      */
-    FlexyStepper_setSpeed(&stepper, 1);          /* units per second        */
+    /* The stepper is the roulette's master azimuth axis, so it works in degrees
+     * of azimuth: 3200 steps/rev over 360 deg means one motor revolution is
+     * exactly one plate orbit, at 0.1125 deg of azimuth per step.
+     * NOTE: the '@' commands therefore speak degrees now, not revolutions.
+     * Acceleration is set to reach 90 deg/s after one full orbit:
+     *     a = v^2 / 2d = 90^2 / (2 * 360) = 11.25 deg/s^2   (an 8 s spin-up) */
+    FlexyStepper_setConversion(&stepper, 3200.0f / 360.0f); /* steps per degree */
+    FlexyStepper_setAcceleration(&stepper, 11.25f);         /* deg per second^2 */
+    FlexyStepper_setSpeed(&stepper, 90.0f);                 /* deg per second   */
 
     /* ---------------------- ODrive on FDCAN1 ----------------------------- */
 
@@ -87,23 +94,32 @@ void setup(void)
         Error_Handler();
     }
 
+    const float conversion = 32.0/(360*2);  //the gear is 1:32 and i want degrees on the output the other /2 is the pulley ratio
+    const float speed = 45;      //2 rotations per second on the output
+    const float acceleration = 100;
+
     /* can_setup must run first: odrive_init already sends a version request. */
-    odrive_init(&odrv0, odrv_can_send, 1, /*conv=*/1.0f, /*invert=*/false);
+    odrive_init(&odrv0, odrv_can_send, 1, /*conv=*/conversion, /*invert=*/false);
     odrive_set_logger(&odrv0, "odrv0", odrv_log);
     odrive_enable_logging(&odrv0, 1);
     // odrive_set_limits(odrive_t *od, float vel_limit, float current_limit);
-    odrive_set_traj_vel_limit(&odrv0, 50);
-    odrive_set_traj_accel_limits(&odrv0, 500, 500);
+    odrive_set_traj_vel_limit(&odrv0, speed);
+    odrive_set_traj_accel_limits(&odrv0, acceleration, acceleration);
     odrive_set_controller_mode(&odrv0, ODRIVE_CONTROL_MODE_POSITION, ODRIVE_INPUT_MODE_TRAP_TRAJ);
     
-    odrive_init(&odrv1, odrv_can_send, 2, /*conv=*/1.0f, /*invert=*/false);
+    odrive_init(&odrv1, odrv_can_send, 2, /*conv=*/conversion, /*invert=*/false);
     odrive_set_logger(&odrv1, "odrv1", odrv_log);
     odrive_enable_logging(&odrv1, 1);
     // odrive_set_limits(odrive_t *od, float vel_limit, float current_limit);
-    odrive_set_traj_vel_limit(&odrv1, 50);
-    odrive_set_traj_accel_limits(&odrv1, 500, 500);
+    odrive_set_traj_vel_limit(&odrv1, speed);
+    odrive_set_traj_accel_limits(&odrv1, acceleration, acceleration);
     odrive_set_controller_mode(&odrv1, ODRIVE_CONTROL_MODE_POSITION, ODRIVE_INPUT_MODE_TRAP_TRAJ);
 
+    x_axis.acceleration = acceleration;
+    x_axis.max_speed = speed;
+
+    y_axis.acceleration = acceleration;
+    y_axis.max_speed = speed;
 }
 
 
@@ -113,6 +129,7 @@ void loop(void)
     uart_listener();
     can_odrive_listener();
     FlexyStepper_loop(&stepper);
+    roulette_sm_loop();
 
 
     static uint32_t loop_timer = 0;

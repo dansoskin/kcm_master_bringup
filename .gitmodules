@@ -10,3 +10,6 @@
 [submodule "Drivers/odrive_lib"]
 	path = Drivers/odrive_lib
 	url = https://github.com/dansoskin/odrive_lib
+[submodule "Drivers/synchronized_movement"]
+	path = Drivers/synchronized_movement
+	url = https://github.com/dansoskin/synchronized_movement
