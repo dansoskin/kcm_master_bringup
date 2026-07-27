@@ -150,6 +150,15 @@ void decode_odrive_commands(char* packet, int len)
         }
             break;
 
+        case 's':   /* heartbeat as text */
+        {
+            char hb[160];
+            /* A NULL odrv (unknown node) formats as "no heartbeat". */
+            odrive_heartbeat_str(odrv ? &odrv->feedback.hb : NULL, hb, sizeof(hb));
+            send_uart(&myUart, "odrv%d: %s\n", node, hb);
+        }
+            break;
+
         default:
             send_uart(&myUart, "Unknown odrive command: %s\n", packet);
             break;
