@@ -48,8 +48,7 @@ void decode_uart(char* packet, char* response, int len)
         	send_uart(&myUart, "Pong\r\n");
         	break;
 
-        case 'R':   /* R<degrees> -- spin that much azimuth, then settle. 360 is
-                     * one orbit, negative reverses. R0 aborts a running spin. */
+        case 'R':   
         {
             float total = atof(result[0]);
             if (total == 0.0f)
@@ -57,15 +56,33 @@ void decode_uart(char* packet, char* response, int len)
                 stop_roulette_sm();
                 break;
             }
-            roulette_total_deg = total;
-            start_roulette_sm();
+
+            start_roulette_sm(total);
+        }
+            break;
+        
+        case 'T':
+        {
+            float deg = atof(result[0]);
+            roulette_set_tilt(deg);
+        }
+            break;
+
+        case 'S':   /* orbit speed in deg/s. Prefer this over '@S' while spinning:
+                     * it keeps the state machine's at-speed tracking honest. */
+        {
+            float deg_per_sec = atof(result[0]);
+            roulette_set_speed(deg_per_sec);
         }
             break;
 
         case 'k':
         case 'K':
+            /* Immediate. The stepper Estop here covers any motion, roulette or
+             * plain '@' move; estop_roulette_sm additionally drops the stream
+             * and hands the drives back to TRAP_TRAJ. Use R0 for a ramped stop. */
             FlexyStepper_Estop(&stepper, 1);
-            stop_roulette_sm();
+            estop_roulette_sm();
             odrive_estop(&odrv0);
             odrive_estop(&odrv1);
             break;
