@@ -21,6 +21,9 @@ void roulette_sm_loop(void);
 
 void roulette_set_tilt(float deg);
 void roulette_set_speed(float deg_per_sec);  /* use instead of a bare '@S' while spinning */
+/* Acceleration and deceleration are not settable: start_roulette_sm derives them
+ * from the speed so the plate always reaches it over one spin and stops within a
+ * quarter of one. Change the speed and the ramps follow. */
 
 
 #ifdef __cplusplus

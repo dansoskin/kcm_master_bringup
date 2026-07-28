@@ -78,9 +78,6 @@ void decode_uart(char* packet, char* response, int len)
 
         case 'k':
         case 'K':
-            /* Immediate. The stepper Estop here covers any motion, roulette or
-             * plain '@' move; estop_roulette_sm additionally drops the stream
-             * and hands the drives back to TRAP_TRAJ. Use R0 for a ramped stop. */
             FlexyStepper_Estop(&stepper, 1);
             estop_roulette_sm();
             odrive_estop(&odrv0);
@@ -157,8 +154,12 @@ void decode_stepper(char* packet, int len)
 			FlexyStepper_setSpeed(&stepper, atof(result[0]));
 		    break;
 
-        case 'A':
+        case 'A':   /* also resets deceleration to match -- send @D after, not before */
             FlexyStepper_setAcceleration(&stepper, atof(result[0]));
+            break;
+
+        case 'D':
+            FlexyStepper_setDeceleration(&stepper, atof(result[0]));
             break;
 
         case 'R':

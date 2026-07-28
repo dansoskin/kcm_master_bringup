@@ -77,15 +77,10 @@ void setup(void)
                                          GPIO2_GPIO_Port, GPIO2_Pin);
     FlexyStepper_connectEnablePin(&stepper, GPIO3_GPIO_Port, GPIO3_Pin, true);
 
-    /* The stepper is the roulette's master azimuth axis, so it works in degrees
-     * of azimuth: 3200 steps/rev over 360 deg means one motor revolution is
-     * exactly one plate orbit, at 0.1125 deg of azimuth per step.
-     * NOTE: the '@' commands therefore speak degrees now, not revolutions.
-     * Acceleration is set to reach 90 deg/s after one full orbit:
-     *     a = v^2 / 2d = 90^2 / (2 * 360) = 11.25 deg/s^2   (an 8 s spin-up) */
+
     FlexyStepper_setConversion(&stepper, 3200.0f / 360.0f); /* steps per degree */
     FlexyStepper_setAcceleration(&stepper, 11.25f);         /* deg per second^2 */
-    FlexyStepper_setSpeed(&stepper, 90.0f);                 /* deg per second   */
+    FlexyStepper_setSpeed(&stepper, 120.0f);                 /* deg per second   */
 
     /* ---------------------- ODrive on FDCAN1 ----------------------------- */
 
@@ -94,7 +89,7 @@ void setup(void)
         Error_Handler();
     }
 
-    const float conversion = 32.0/(360*2);  //the gear is 1:32 and i want degrees on the output the other /2 is the pulley ratio
+    const float conversion = 32.0*2/(360);  //the gear is 1:32 and i want degrees on the output the other /2 is the pulley ratio
     const float speed = 45;      //2 rotations per second on the output
     const float acceleration = 100;
 

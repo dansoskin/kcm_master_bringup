@@ -12,6 +12,15 @@
 #define ROULETTE_TICK_MS          5U      /* 200 Hz setpoint stream            */
 #define ROULETTE_AT_SPEED_FRAC    0.99f   /* when ACCELERATING becomes SPINNING*/
 
+/* The ramps are derived from the speed rather than configured: reach top speed
+ * over exactly one spin, shed it over a quarter of one.
+ *      a = v^2 / (2 * 360)        d = v^2 / (2 * 90)
+ * Deceleration is therefore always 4x acceleration, whatever the speed. A
+ * sequence needs at least 360 + 90 = 450 deg to reach cruise at all; anything
+ * shorter is a triangular profile that never gets there. */
+#define ROULETTE_ACCEL_DEG      360.0f    /* one spin to reach speed     */
+#define ROULETTE_DECEL_DEG       90.0f    /* quarter spin to stop        */
+
 /* -------------------------------------------------------------------------- */
 /* State                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -25,7 +34,7 @@ const char *roulette_sm_states_strings[] = {
 roulette_sm_states roulette_sm_state = ROULETTE_IDLE;
 uint32_t roulette_sm_timer = 0;
 
-float roulette_tilt_deg = 0.0f;
+float roulette_tilt_deg = 10.0f;
 float roulette_total_deg = 3600.0f;    /* azimuth for one whole sequence */
 
 static uint32_t roulette_stream_timer = 0;
@@ -146,8 +155,34 @@ static void roulette_stream(void)
 
 void start_roulette_sm(float total_deg)
 {
+    /* The ramps are derived from the speed below, so a speed of zero would give
+     * an acceleration of zero, and 1e6/sqrt(0) makes the step period infinite --
+     * the move would never step. roulette_set_speed refuses zero, but a bare
+     * '@S0' can still get here. */
+    if (!(FlexyStepper_getTargetSpeed(&stepper) > 0.0f))
+    {
+        send_uart(&myUart, "roulette: stepper speed is 0, set it with S first\n");
+        return;
+    }
+
     roulette_total_deg = total_deg;
     FlexyStepper_setCurrentPosition(&stepper,fmodf(FlexyStepper_getCurrentPosition(&stepper), 360.0f)); //make position smaller
+
+    /* Derive both ramps from the speed in force right now, so they always suit
+     * it: one spin to reach it, a quarter spin to shed it. Order is
+     * load-bearing -- setAcceleration resets deceleration to match, so the
+     * deceleration write must come second. Doing this here also makes the
+     * roulette immune to a stray '@A' or '@D' between sequences. */
+    const float speed = FlexyStepper_getTargetSpeed(&stepper);
+    const float accel = (speed * speed) / (2.0f * ROULETTE_ACCEL_DEG);
+    const float decel = (speed * speed) / (2.0f * ROULETTE_DECEL_DEG);
+
+    FlexyStepper_setAcceleration(&stepper, accel);
+    FlexyStepper_setDeceleration(&stepper, decel);
+
+    send_uart(&myUart, "roulette: %.1f deg at %.1f deg/s, accel %.2f, decel %.2f\n",
+              total_deg, speed, accel, decel);
+
     set_csp(true);
     set_roulette_sm_state(ROULETTE_ARMING);
 }
