@@ -72,15 +72,24 @@ void setup(void)
     FlexyStepper_attach_timer_for_micros(&htim23);
     FlexyStepper_attach_logger(&huart6);
 
-    FlexyStepper_Init(&stepper, "Stepper1");
-    FlexyStepper_connectToPins(&stepper, GPIO1_GPIO_Port, GPIO1_Pin,
+    FlexyStepper_Init(&stepper1, "Stepper1");
+    FlexyStepper_connectToPins(&stepper1, GPIO1_GPIO_Port, GPIO1_Pin,
                                          GPIO2_GPIO_Port, GPIO2_Pin);
-    FlexyStepper_connectEnablePin(&stepper, GPIO3_GPIO_Port, GPIO3_Pin, true);
+    FlexyStepper_connectEnablePin(&stepper1, GPIO3_GPIO_Port, GPIO3_Pin, true);
+
+    FlexyStepper_setConversion(&stepper1, 3200.0f / 360.0f); /* steps per degree */
+    FlexyStepper_setDefaults(&stepper1, 120.0f, 11.25f, 90.0f);   
 
 
-    FlexyStepper_setConversion(&stepper, 3200.0f / 360.0f); /* steps per degree */
-    FlexyStepper_setAcceleration(&stepper, 11.25f);         /* deg per second^2 */
-    FlexyStepper_setSpeed(&stepper, 120.0f);                 /* deg per second   */
+
+    FlexyStepper_Init(&stepper2, "Stepper2");
+    FlexyStepper_connectToPins(&stepper2, GPIO1_GPIO_Port, GPIO1_Pin,
+                                         GPIO2_GPIO_Port, GPIO2_Pin);
+    FlexyStepper_connectEnablePin(&stepper2, GPIO3_GPIO_Port, GPIO3_Pin, true);
+
+    FlexyStepper_setConversion(&stepper2, 3200.0f / 360.0f); /* steps per degree */
+    FlexyStepper_setDefaults(&stepper2,5.0f, 10.0f, 10.0f);
+
 
     /* ---------------------- ODrive on FDCAN1 ----------------------------- */
 
@@ -123,7 +132,8 @@ void loop(void)
 {
     uart_listener();
     can_odrive_listener();
-    FlexyStepper_loop(&stepper);
+    FlexyStepper_loop(&stepper1);
+    FlexyStepper_loop(&stepper2);
     roulette_sm_loop();
 
 

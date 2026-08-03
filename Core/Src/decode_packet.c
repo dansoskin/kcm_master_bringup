@@ -50,20 +50,26 @@ void decode_uart(char* packet, char* response, int len)
 
         case 'R':   
         {
-            float total = atof(result[0]);
-            if (total == 0.0f)
+            float deg = atof(result[0]);
+            float tilt = (count >= 2) ? atof(result[1]) : 0.0f;
+            if (deg == 0.0f)
             {
                 stop_roulette_sm();
                 break;
             }
 
-            start_roulette_sm(total);
+            start_roulette_sm(deg, tilt);
         }
             break;
         
-        case 'T':
+        case 'T':   /* T<deg> tilt target, T<deg>,<deg_per_sec> to retune the ramp */
         {
             float deg = atof(result[0]);
+            if(deg == 0.0f)
+            {
+                stop_roulette_sm();
+                break;
+            }
             roulette_set_tilt(deg);
         }
             break;
@@ -72,13 +78,29 @@ void decode_uart(char* packet, char* response, int len)
                      * it keeps the state machine's at-speed tracking honest. */
         {
             float deg_per_sec = atof(result[0]);
+            if(deg_per_sec == 0.0f)
+            {
+                stop_roulette_sm();
+                break;
+            }
             roulette_set_speed(deg_per_sec);
         }
             break;
 
+        case 'M':
+            sync_move_plate(atof(result[0]), atof(result[1]), "M");
+            FlexyStepper_setCurrentPosition(&stepper1, atof(result[0]));
+            FlexyStepper_setCurrentPosition(&stepper2, atof(result[1]));
+            break;
+
+
         case 'k':
         case 'K':
-            FlexyStepper_Estop(&stepper, 1);
+            /* estop_roulette_sm halts both masters, but only when a sequence is
+             * running -- these cover a K typed while idle. stepper2 is halted
+             * without releasing: de-energising the tilt axis drops the plate. */
+            FlexyStepper_Estop(&stepper1, 1);
+            FlexyStepper_Estop(&stepper2, 0);
             estop_roulette_sm();
             odrive_estop(&odrv0);
             odrive_estop(&odrv1);
@@ -138,7 +160,6 @@ static void sync_move_plate(float x_target_deg, float y_target_deg, const char* 
               x_axis._time);
 }
 
-
 void decode_stepper(char* packet, int len)
 {
     if(len < 1)
@@ -146,32 +167,105 @@ void decode_stepper(char* packet, int len)
 
     char result[10][20] = {0};	//10 values of 20 characters
     int count = split_csv_string(packet+1, result, ",");
-    UNUSED(count);
+
+    int stepper_number = atoi(result[0]);
+    FlexyStepper * stpr = NULL;
+    if(stepper_number == 1)
+        stpr = &stepper1;
+    else if(stepper_number == 2)
+        stpr = &stepper2;
+
+    if(stpr == NULL)
+    {
+        send_uart(&myUart, "Unknown stepper number: %d\n", stepper_number);
+        return;
+    }
 
     switch(packet[0])
 	{
         case 'S':
-			FlexyStepper_setSpeed(&stepper, atof(result[0]));
+			FlexyStepper_setSpeed(stpr, atof(result[1]));
 		    break;
 
         case 'A':   /* also resets deceleration to match -- send @D after, not before */
-            FlexyStepper_setAcceleration(&stepper, atof(result[0]));
+            FlexyStepper_setAcceleration(stpr, atof(result[1]));
             break;
 
         case 'D':
-            FlexyStepper_setDeceleration(&stepper, atof(result[0]));
+            FlexyStepper_setDeceleration(stpr, atof(result[1]));
             break;
 
         case 'R':
-            FlexyStepper_setTargetPositionRelative(&stepper, atof(result[0]), true);
+            FlexyStepper_setTargetPositionRelative(stpr, atof(result[1]), true);
             break;
 
-        // case 'A':
-        //     FlexyStepper_setTargetPosition(&stepper, atof(result[0]), true);
-        //     break;
-
         case 'J':
-            FlexyStepper_jog(&stepper, atof(result[0]));
+            FlexyStepper_jog(stpr, atof(result[1]));
+            break;
+
+        case 'P':
+            FlexyStepper_setCurrentPosition(stpr, atof(result[1]));
+            break;
+
+        case 'p':
+            send_uart(&myUart, "Stepper %d: pos %.2f, speed %.2f\n",
+                      stepper_number,
+                      FlexyStepper_getCurrentPosition(stpr),
+                      FlexyStepper_getCurrentVelocity(stpr));
+            break;
+
+        case 'F':   /* back to the speed/accel/decel set in setup_all() */
+            FlexyStepper_restoreDefaults(stpr);
+            break;
+
+        case 'T':   /* @T,<n>,<A|R>,<target>,<seconds> -- solve the speed that
+                     * makes the move take <seconds> and start it. Leaves the
+                     * solved speed in place; @F puts the default back. */
+        {
+            const char mode = result[1][0];
+            const bool absolute = (mode == 'A' || mode == 'a');
+
+            if (count < 4 || !(absolute || mode == 'R' || mode == 'r'))
+            {
+                send_uart(&myUart, "Usage: @T,<n>,<A|R>,<target>,<seconds>\n");
+                break;
+            }
+
+            const float target  = atof(result[2]);
+            const float seconds = atof(result[3]);
+
+            FlexyStepper_move_status st = absolute
+                ? FlexyStepper_setTimedTargetPosition(stpr, target, seconds, true)
+                : FlexyStepper_setTimedTargetPositionRelative(stpr, target, seconds, true);
+
+            if (st == FLEXY_MOVE_OK)
+            {
+                send_uart(&myUart, "Stepper %d: %s %.2f in %.3fs at %.2f/s\n",
+                          stepper_number, absolute ? "to" : "by", target, seconds,
+                          FlexyStepper_getTargetSpeed(stpr));
+            }
+            else if (st == FLEXY_MOVE_TOO_FAST)
+            {
+                /* Re-solve purely to report the achievable time -- the rejected
+                 * command left the motor and its position untouched. */
+                const float distance = absolute
+                    ? target - FlexyStepper_getCurrentPosition(stpr)
+                    : target;
+                float min_seconds = 0.0f;
+
+                FlexyStepper_solveTimedMove(stpr, distance, seconds, NULL, &min_seconds);
+                send_uart(&myUart, "Stepper %d: %.3fs too fast for %.2f, needs >= %.3fs"
+                                   " (accel %.2f, decel %.2f)\n",
+                          stepper_number, seconds, distance, min_seconds,
+                          FlexyStepper_getAcceleration(stpr),
+                          FlexyStepper_getDeceleration(stpr));
+            }
+            else
+            {
+                send_uart(&myUart, "Stepper %d: timed move failed -- %s\n",
+                          stepper_number, FlexyStepper_move_status_str(st));
+            }
+        }
             break;
 
         default:
@@ -179,7 +273,6 @@ void decode_stepper(char* packet, int len)
             break;
     }
 }
-
 
 void decode_odrive_commands(char* packet, int len)
 {

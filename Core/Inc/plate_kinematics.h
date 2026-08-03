@@ -23,7 +23,7 @@ extern "C" {
 
 /* Maximum tilt from level. Requests beyond this are refused outright so a typo
  * cannot drive the plate into a hard stop. Confirm against real travel. */
-#define PLATE_MAX_TILT_DEG      (30.0f)
+#define PLATE_MAX_TILT_DEG      (11.0f)
 
 /* Per-axis direction, +1.0f or -1.0f. Real motor direction depends on winding
  * and mounting; settle these with an inclinometer at bring-up.
@@ -54,19 +54,23 @@ typedef enum {
 plate_status_t plate_angles_from_tilt(float azimuth_deg, float tilt_deg,
                                       float *out_x_deg, float *out_y_deg);
 
-/* Motor velocities for a plate spinning at constant tilt -- the velocity
- * feedforward for streamed (CSP) position control.
+/* Motor velocities for a moving plate -- the velocity feedforward for streamed
+ * (CSP) position control.
  *
- *   azimuth_rate_deg_s  how fast the azimuth is advancing. Signed; 0 is legal
- *                       and yields zero rates.
+ *   azimuth_rate_deg_s  how fast the azimuth is advancing. Signed; 0 is legal.
+ *   tilt_rate_deg_s     how fast the tilt is opening or closing. Signed; 0 is
+ *                       legal and reduces this to the constant-tilt case.
  *   out_x_rate_deg_s    velocity for the motor leaning toward X (odrv1)
  *   out_y_rate_deg_s    velocity for the motor leaning toward Y (odrv0)
  *
- * Analytic derivative of plate_angles_from_tilt with respect to azimuth, so it
- * is exact rather than a finite difference. Validates and fails exactly as
- * plate_angles_from_tilt does, leaving the outputs untouched on error. */
+ * Total analytic derivative of plate_angles_from_tilt -- both partials, so it
+ * stays exact while the tilt axis is ramping, not just while it is parked.
+ * Passing tilt_rate_deg_s = 0 gives exactly the azimuth-only result.
+ * Validates and fails exactly as plate_angles_from_tilt does, leaving the
+ * outputs untouched on error. */
 plate_status_t plate_rates_from_spin(float azimuth_deg, float tilt_deg,
                                      float azimuth_rate_deg_s,
+                                     float tilt_rate_deg_s,
                                      float *out_x_rate_deg_s,
                                      float *out_y_rate_deg_s);
 

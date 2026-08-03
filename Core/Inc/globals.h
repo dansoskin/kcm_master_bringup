@@ -11,7 +11,7 @@
 
 
 extern myUART_t myUart;
-extern FlexyStepper stepper;
+extern FlexyStepper stepper1, stepper2;
 extern odrive_t odrv0, odrv1;
 extern SyncAxis x_axis, y_axis;
 

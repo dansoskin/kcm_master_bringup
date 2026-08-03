@@ -147,27 +147,46 @@ int main(void)
 
     /* ---------------- plate_rates_from_spin ---------------- */
 
-    printf("spin rates match a numeric derivative of the geometry\n");
+    printf("rates match a numeric derivative of the geometry, in BOTH variables\n");
     {
         /* Differentiate the DOUBLE reference (ref_x/ref_y below), not the float32
          * implementation. Differencing float32 angles has a ~0.03 deg/s noise
          * floor of its own -- the same order as the error being looked for, so
          * it cannot resolve a real mistake. The reference restates the geometry
          * from the plate normal and never uses the derivative formula, so this
-         * stays an independent check of the derivation. */
-        const double h = 1e-6;      /* deg of azimuth */
+         * stays an independent check of the derivation.
+         *
+         * The rate is a TOTAL derivative now, so the reference is the sum of
+         * both partials. Cases with r != 0 are what catch a missing or
+         * mis-signed tilt term; the azimuth-only rows (r == 0) keep the
+         * original coverage intact. */
+        const double h = 1e-6;      /* deg, used for both partials */
+        const double wr[][2] = {
+            {  90.0,   0.0 },   /* pure spin, the original cases            */
+            { -37.5,   0.0 },
+            { 360.0,   0.0 },
+            {   0.0,   5.0 },   /* pure tilt ramp, opening                  */
+            {   0.0,  -5.0 },   /* pure tilt ramp, closing                  */
+            {  90.0,   5.0 },   /* the real case: spinning while tilting in */
+            { -90.0,  12.0 },
+            { 360.0,  -3.0 },
+        };
         int n = 0;
         double worst_rel = 0.0, worst_abs = 0.0;
         for (double az = 0; az < 360.0; az += 3.0) {
             for (double ti = 1.0; ti <= 30.0; ti += 1.0) {
-                for (int s = 0; s < 3; s++) {
-                    const float w = (float)((s == 0) ? 90.0 : (s == 1) ? -37.5 : 360.0);
+                for (size_t s = 0; s < sizeof(wr) / sizeof(wr[0]); s++) {
+                    const float w = (float)wr[s][0];
+                    const float r = (float)wr[s][1];
                     float rx, ry;
-                    if (plate_rates_from_spin((float)az, (float)ti, w, &rx, &ry) != PLATE_OK) {
+                    if (plate_rates_from_spin((float)az, (float)ti, w, r, &rx, &ry) != PLATE_OK) {
                         worst_abs = 1e9; continue;
                     }
-                    double nx = (ref_x(az + h, ti) - ref_x(az - h, ti)) / (2.0 * h) * w;
-                    double ny = (ref_y(az + h, ti) - ref_y(az - h, ti)) / (2.0 * h) * w;
+                    /* total derivative = dref/daz * w + dref/dti * r */
+                    double nx = (ref_x(az + h, ti) - ref_x(az - h, ti)) / (2.0 * h) * w
+                              + (ref_x(az, ti + h) - ref_x(az, ti - h)) / (2.0 * h) * r;
+                    double ny = (ref_y(az + h, ti) - ref_y(az - h, ti)) / (2.0 * h) * w
+                              + (ref_y(az, ti + h) - ref_y(az, ti - h)) / (2.0 * h) * r;
                     double ex = fabs(nx - rx), ey = fabs(ny - ry);
                     if (ex > worst_abs) worst_abs = ex;
                     if (ey > worst_abs) worst_abs = ey;
@@ -188,10 +207,53 @@ int main(void)
         check(n > 0 && worst_rel < 1e-4, "analytic rate matches numeric derivative");
     }
 
+    printf("a zero tilt rate reproduces the azimuth-only result exactly\n");
+    {
+        /* The tilt term is additive, so this is what keeps the extension
+         * backward compatible for any caller that parks the tilt axis. */
+        for (float az = 0; az < 360.0f; az += 21.0f) {
+            float ax, ay, bx, by;
+            plate_rates_from_spin(az, 14.0f, 90.0f, 0.0f, &ax, &ay);
+            /* independent restatement of the old formula */
+            const float t = tanf(14.0f * (float)DEG);
+            const float cxx = cosf(atan2f(sinf(14.0f * (float)DEG) * cosf(az * (float)DEG),
+                                          cosf(14.0f * (float)DEG)));
+            const float cyy = cosf(atan2f(-sinf(14.0f * (float)DEG) * sinf(az * (float)DEG),
+                                          cosf(14.0f * (float)DEG)));
+            bx = -90.0f * t * sinf(az * (float)DEG) * cxx * cxx;
+            by = -90.0f * t * cosf(az * (float)DEG) * cyy * cyy;
+            check_near(ax, bx, 1e-4f, "tilt rate 0 -> x matches azimuth-only formula");
+            check_near(ay, by, 1e-4f, "tilt rate 0 -> y matches azimuth-only formula");
+        }
+    }
+
+    printf("tilting straight up the lean direction moves only that motor\n");
+    {
+        /* Azimuth 0 leans purely toward X, so opening the tilt there is a pure
+         * toward-X motion and the toward-Y motor must stay still. */
+        float rx, ry;
+        plate_rates_from_spin(0.0f, 10.0f, 0.0f, 5.0f, &rx, &ry);
+        check_near(ry, 0.0f, 1e-4f, "az 0, pure tilt -> toward-Y motor still");
+        check_near(rx, 5.0f, 1e-3f, "az 0, pure tilt -> toward-X motor tracks tilt 1:1");
+        /* Azimuth 90 leans purely toward Y; sign is the right-hand rule again. */
+        plate_rates_from_spin(90.0f, 10.0f, 0.0f, 5.0f, &rx, &ry);
+        check_near(rx,  0.0f, 1e-4f, "az 90, pure tilt -> toward-X motor still");
+        check_near(ry, -5.0f, 1e-3f, "az 90, pure tilt -> toward-Y motor tracks -tilt");
+    }
+
+    printf("reversing the tilt ramp reverses both motor rates\n");
+    {
+        float fx, fy, bx, by;
+        plate_rates_from_spin(30.0f, 12.0f, 0.0f,  7.0f, &fx, &fy);
+        plate_rates_from_spin(30.0f, 12.0f, 0.0f, -7.0f, &bx, &by);
+        check_near(bx, -fx, 1e-5f, "reversed tilt ramp negates x rate");
+        check_near(by, -fy, 1e-5f, "reversed tilt ramp negates y rate");
+    }
+
     printf("zero spin rate gives zero motor rates\n");
     {
         float rx = 5.0f, ry = 5.0f;
-        check(plate_rates_from_spin(45.0f, 10.0f, 0.0f, &rx, &ry) == PLATE_OK, "rate 0 accepted");
+        check(plate_rates_from_spin(45.0f, 10.0f, 0.0f, 0.0f, &rx, &ry) == PLATE_OK, "rate 0 accepted");
         check_near(rx, 0.0f, 1e-6f, "rate 0 -> x rate 0");
         check_near(ry, 0.0f, 1e-6f, "rate 0 -> y rate 0");
     }
@@ -201,10 +263,10 @@ int main(void)
         /* azimuth 0 puts the toward-X motor at full lean, so its rate is 0 and
          * the toward-Y motor is sweeping fastest. Azimuth 90 swaps them. */
         float rx, ry;
-        plate_rates_from_spin(0.0f, 10.0f, 90.0f, &rx, &ry);
+        plate_rates_from_spin(0.0f, 10.0f, 90.0f, 0.0f, &rx, &ry);
         check_near(rx, 0.0f, 1e-3f, "az 0 -> toward-X motor at peak, rate 0");
         check(fabsf(ry) > 1.0f, "az 0 -> toward-Y motor sweeping");
-        plate_rates_from_spin(90.0f, 10.0f, 90.0f, &rx, &ry);
+        plate_rates_from_spin(90.0f, 10.0f, 90.0f, 0.0f, &rx, &ry);
         check_near(ry, 0.0f, 1e-3f, "az 90 -> toward-Y motor at peak, rate 0");
         check(fabsf(rx) > 1.0f, "az 90 -> toward-X motor sweeping");
     }
@@ -212,8 +274,8 @@ int main(void)
     printf("reversing the spin reverses both motor rates\n");
     {
         float fx, fy, bx, by;
-        plate_rates_from_spin(30.0f, 12.0f,  90.0f, &fx, &fy);
-        plate_rates_from_spin(30.0f, 12.0f, -90.0f, &bx, &by);
+        plate_rates_from_spin(30.0f, 12.0f,  90.0f, 0.0f, &fx, &fy);
+        plate_rates_from_spin(30.0f, 12.0f, -90.0f, 0.0f, &bx, &by);
         check_near(bx, -fx, 1e-5f, "reversed spin negates x rate");
         check_near(by, -fy, 1e-5f, "reversed spin negates y rate");
     }
@@ -221,14 +283,16 @@ int main(void)
     printf("spin rates reject the same inputs the angles do\n");
     {
         float rx = 42.0f, ry = 42.0f;
-        check(plate_rates_from_spin(0.0f, 31.0f, 90.0f, &rx, &ry) == PLATE_ERR_RANGE, "tilt 31 refused");
-        check(plate_rates_from_spin(NAN, 10.0f, 90.0f, &rx, &ry) == PLATE_ERR_BAD_ARG, "NaN azimuth refused");
-        check(plate_rates_from_spin(0.0f, 10.0f, NAN, &rx, &ry) == PLATE_ERR_BAD_ARG, "NaN rate refused");
-        check(plate_rates_from_spin(0.0f, 10.0f, INFINITY, &rx, &ry) == PLATE_ERR_BAD_ARG, "Inf rate refused");
+        check(plate_rates_from_spin(0.0f, 31.0f, 90.0f, 0.0f, &rx, &ry) == PLATE_ERR_RANGE, "tilt 31 refused");
+        check(plate_rates_from_spin(NAN, 10.0f, 90.0f, 0.0f, &rx, &ry) == PLATE_ERR_BAD_ARG, "NaN azimuth refused");
+        check(plate_rates_from_spin(0.0f, 10.0f, NAN, 0.0f, &rx, &ry) == PLATE_ERR_BAD_ARG, "NaN azimuth rate refused");
+        check(plate_rates_from_spin(0.0f, 10.0f, INFINITY, 0.0f, &rx, &ry) == PLATE_ERR_BAD_ARG, "Inf azimuth rate refused");
+        check(plate_rates_from_spin(0.0f, 10.0f, 90.0f, NAN, &rx, &ry) == PLATE_ERR_BAD_ARG, "NaN tilt rate refused");
+        check(plate_rates_from_spin(0.0f, 10.0f, 90.0f, INFINITY, &rx, &ry) == PLATE_ERR_BAD_ARG, "Inf tilt rate refused");
         check_near(rx, 42.0f, 0.0f, "refused call leaves x rate untouched");
         check_near(ry, 42.0f, 0.0f, "refused call leaves y rate untouched");
-        check(plate_rates_from_spin(0.0f, 10.0f, 90.0f, NULL, &ry) == PLATE_ERR_BAD_ARG, "NULL out_x refused");
-        check(plate_rates_from_spin(0.0f, 10.0f, 90.0f, &rx, NULL) == PLATE_ERR_BAD_ARG, "NULL out_y refused");
+        check(plate_rates_from_spin(0.0f, 10.0f, 90.0f, 0.0f, NULL, &ry) == PLATE_ERR_BAD_ARG, "NULL out_x refused");
+        check(plate_rates_from_spin(0.0f, 10.0f, 90.0f, 0.0f, &rx, NULL) == PLATE_ERR_BAD_ARG, "NULL out_y refused");
     }
 
     printf("\n%d checks, %d failures\n", checks, failures);
